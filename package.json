@@ -2,12 +2,12 @@
   "name": "trae-chats-exporter",
   "displayName": "TraeChats Exporter",
   "description": "Export and view your Trae AI chat history. Browse through your past conversations, view code snippets, and save chat histories from all your workspaces.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository": {
     "type": "git",
     "url": "https://github.com/yuanjing001/trae-chats-exporter"
   },
-  "publisher": "yuanjing001",
+  "publisher": "yuanjing",
   "license": "MIT",
   "engines": {
     "vscode": "^1.93.0"
