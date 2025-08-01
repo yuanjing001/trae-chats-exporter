@@ -1,0 +1,98 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Install vsce
+      run: npm install -g @vscode/vsce
+    
+    - name: Run linting
+      run: npm run lint
+    
+    - name: Compile TypeScript
+      run: npm run compile
+    
+    - name: Update version number
+      id: version
+      run: |
+        # 获取当前版本
+        CURRENT_VERSION=$(node -p "require('./package.json').version")
+        echo "Current version: $CURRENT_VERSION"
+        
+        # 生成新版本号 (基于时间戳的补丁版本)
+        TIMESTAMP=$(date +%Y%m%d%H%M)
+        BASE_VERSION=$(echo $CURRENT_VERSION | cut -d. -f1,2)
+        NEW_VERSION="${BASE_VERSION}.${TIMESTAMP}"
+        
+        # 更新 package.json
+        npm version $NEW_VERSION --no-git-tag-version
+        
+        echo "New version: $NEW_VERSION"
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Package extension
+      run: vsce package --no-dependencies
+    
+    - name: Get package filename
+      id: package
+      run: |
+        VSIX_FILE=$(ls *.vsix)
+        echo "filename=$VSIX_FILE" >> $GITHUB_OUTPUT
+    
+    - name: Commit version update
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add package.json
+        git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
+        git push
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: Release ${{ steps.version.outputs.version }}
+        body: |
+          🚀 **自动构建版本 ${{ steps.version.outputs.version }}**
+          
+          **构建信息:**
+          - 提交: ${{ github.sha }}
+          - 构建时间: ${{ github.event.head_commit.timestamp }}
+          - 分支: ${{ github.ref_name }}
+          
+          **下载:**
+          - 点击下方的 `${{ steps.package.outputs.filename }}` 文件下载扩展
+          
+          **安装方法:**
+          1. 下载 `.vsix` 文件
+          2. 在 VS Code 中按 `Ctrl+Shift+P` (或 `Cmd+Shift+P`)
+          3. 输入 "Extensions: Install from VSIX"
+          4. 选择下载的文件进行安装
+        files: ${{ steps.package.outputs.filename }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

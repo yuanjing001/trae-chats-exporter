@@ -1,0 +1,60 @@
+{
+  "name": "trae-chats-exporter",
+  "displayName": "TraeChats Exporter",
+  "description": "Export and view your Trae AI chat history. Browse through your past conversations, view code snippets, and save chat histories from all your workspaces.",
+  "version": "0.1.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yuanjing001/trae-chats-exporter"
+  },
+  "publisher": "yuanjing001",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#CCCCCC",
+    "theme": "dark"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:traechat-downloader.downloadChatHistory"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "traechat-downloader.downloadChatHistory",
+        "title": "Export TraeChats",
+        "category": "TraeChat",
+        "description": "Export your TraeChats to a SQLite database"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "pnpm run compile && pnpm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.9",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.93.0",
+    "@typescript-eslint/eslint-plugin": "^8.10.0",
+    "@typescript-eslint/parser": "^8.7.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.13.0",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  }
+}
