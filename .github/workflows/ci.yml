@@ -46,10 +46,9 @@ jobs:
         CURRENT_VERSION=$(node -p "require('./package.json').version")
         echo "Current version: $CURRENT_VERSION"
         
-        # 生成新版本号 (基于时间戳的补丁版本)
-        TIMESTAMP=$(date +%Y%m%d%H%M)
+        # 生成新版本号 (使用 GitHub run number)
         BASE_VERSION=$(echo $CURRENT_VERSION | cut -d. -f1,2)
-        NEW_VERSION="${BASE_VERSION}.${TIMESTAMP}"
+        NEW_VERSION="${BASE_VERSION}.${{ github.run_number }}"
         
         # 更新 package.json
         pnpm version $NEW_VERSION --no-git-tag-version
@@ -64,7 +63,8 @@ jobs:
     - name: Get package filename
       id: package
       run: |
-        VSIX_FILE=$(ls *.vsix)
+        VSIX_FILE=$(ls *.vsix | head -1)
+        echo "Found VSIX file: $VSIX_FILE"
         echo "filename=$VSIX_FILE" >> $GITHUB_OUTPUT
     
     - name: Commit version update
