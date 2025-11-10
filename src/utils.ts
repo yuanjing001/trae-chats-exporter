@@ -1,9 +1,35 @@
 import path from 'path';
 import fs from 'fs/promises';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
 import { existsSync } from 'fs';
 import os from 'os';
+import initSqlJs from 'sql.js';
+
+// 使用 sql.js 打开 SQLite 数据库
+async function openSqlJsDb(filePath: string) {
+  const SQL = await initSqlJs({
+    locateFile: (file: string) => require.resolve('sql.js/dist/' + file),
+  });
+  const data = await fs.readFile(filePath);
+  const db = new SQL.Database(new Uint8Array(data));
+  return { SQL, db };
+}
+
+function queryOneByKey(db: any, key: string): { value: string } | null {
+  const stmt = db.prepare('SELECT value FROM ItemTable WHERE [key] = ?');
+  stmt.bind([key]);
+  const row = stmt.step() ? (stmt.getAsObject() as any) : null;
+  stmt.free();
+  return row;
+}
+
+function queryAll(db: any, sql: string): { key: string; value: string }[] {
+  const res = db.exec(sql);
+  if (!res || res.length === 0) return [];
+  const { columns, values } = res[0];
+  const keyIdx = columns.indexOf('key');
+  const valueIdx = columns.indexOf('value');
+  return values.map((row: any[]) => ({ key: row[keyIdx], value: row[valueIdx] }));
+}
 
 export async function getWorkspaces() {
 	const defaultPath = path.join(os.homedir(), 'Library/Application Support/Trae/User/workspaceStorage');
@@ -28,10 +54,7 @@ export async function getWorkspaces() {
 			
 			try {
 				const stats = await fs.stat(dbPath);
-				const db = await open({
-					filename: dbPath,
-					driver: sqlite3.Database
-				});
+                const { db } = await openSqlJsDb(dbPath);
 				
 				// Try multiple possible chat data keys - updated with correct key
 				const chatKeys = [
@@ -46,24 +69,24 @@ export async function getWorkspaces() {
 				let usedKey = '';
 				
 				// First try the known keys
-				for (const key of chatKeys) {
-					result = await db.get(`SELECT value FROM ItemTable WHERE [key] = ?`, key);
-					if (result) {
-						usedKey = key;
-						break;
-					}
-				}
+                for (const key of chatKeys) {
+                    result = queryOneByKey(db, key);
+                    if (result) {
+                        usedKey = key;
+                        break;
+                    }
+                }
 				
 				// If no known keys found, search for any chat-related keys
 				if (!result) {
-					const chatRelatedKeys = await db.all(`
-						SELECT [key], value FROM ItemTable 
-						WHERE [key] LIKE '%chat%' 
-						   OR [key] LIKE '%ai%' 
-						   OR [key] LIKE '%conversation%' 
-						   OR [key] LIKE '%session%'
-						   OR [key] LIKE '%memento%'
-					`);
+                    const chatRelatedKeys = queryAll(db, `
+                        SELECT [key], value FROM ItemTable 
+                        WHERE [key] LIKE '%chat%' 
+                           OR [key] LIKE '%ai%' 
+                           OR [key] LIKE '%conversation%' 
+                           OR [key] LIKE '%session%'
+                           OR [key] LIKE '%memento%'
+                    `);
 					
 					// Try each potential key and see if it contains chat data
 					for (const keyRow of chatRelatedKeys) {
@@ -90,19 +113,25 @@ export async function getWorkspaces() {
 					}
 				}
 				
-				// If no chat data found, let's see what keys actually exist
-				if (!result && processedCount < 5) {
-					const allKeys = await db.all(`SELECT [key] FROM ItemTable WHERE [key] LIKE '%chat%'`);
-					if (allKeys.length > 0) {
-						console.log(`Chat-related keys in ${entry.name}:`, allKeys.map(k => k.key));
-					} else {
-						// Check for any keys that might be related to AI chat
-						const aiKeys = await db.all(`SELECT [key] FROM ItemTable WHERE [key] LIKE '%ai%' OR [key] LIKE '%conversation%' OR [key] LIKE '%message%'`);
-						if (aiKeys.length > 0) {
-							console.log(`AI/conversation-related keys in ${entry.name}:`, aiKeys.map(k => k.key));
-						}
-					}
-				}
+                // If no chat data found, let's see what keys actually exist
+                if (!result && processedCount < 5) {
+                    const allKeys = queryAll(db, `SELECT [key], value FROM ItemTable WHERE [key] LIKE '%chat%'`);
+                    if (allKeys.length > 0) {
+                        console.log(
+                          `Chat-related keys in ${entry.name}:`,
+                          allKeys.map((k: { key: string; value: string }) => k.key)
+                        );
+                    } else {
+                        // Check for any keys that might be related to AI chat
+                        const aiKeys = queryAll(db, `SELECT [key], value FROM ItemTable WHERE [key] LIKE '%ai%' OR [key] LIKE '%conversation%' OR [key] LIKE '%message%'`);
+                        if (aiKeys.length > 0) {
+                            console.log(
+                              `AI/conversation-related keys in ${entry.name}:`,
+                              aiKeys.map((k: { key: string; value: string }) => k.key)
+                            );
+                        }
+                    }
+                }
 				
 				// Parse the chat data and count tabs
 				let chatCount = 0;
@@ -191,8 +220,8 @@ export async function getWorkspaces() {
 					chatCount: chatCount
 				});
 				
-				await db.close();
-				processedCount++;
+                db.close();
+                processedCount++;
 			} catch (error) {
 				console.error(`Error processing workspace ${entry.name}:`, error);
 			}
@@ -609,4 +638,70 @@ export function safeParseTimestamp(timestamp: number | undefined): string {
 		console.error('Error parsing timestamp:', error, 'Raw value:', timestamp);
 		return new Date().toISOString();
 	}
+}
+
+// 从数据库中查找包含指定会话ID且具备 messages 的完整对象
+export async function findSessionWithMessages(workspaceDbPath: string, sessionId: string): Promise<any | null> {
+  try {
+    const { db } = await openSqlJsDb(workspaceDbPath);
+    const rows = queryAll(db, `SELECT [key], value FROM ItemTable WHERE value LIKE '%${sessionId}%'`);
+
+    for (const row of rows) {
+      try {
+        const data = JSON.parse(row.value);
+
+        // 直接对象，包含 messages 数组
+        if (data && Array.isArray(data.messages) && data.messages.length > 0) {
+          db.close();
+          return data;
+        }
+
+        // data.entries 可能是 map 或数组
+        if (data && data.entries) {
+          if (Array.isArray(data.entries)) {
+            const found = data.entries.find((e: any) => (e.sessionId || e.id) === sessionId && Array.isArray(e.messages) && e.messages.length > 0);
+            if (found) {
+              db.close();
+              return found;
+            }
+          } else if (typeof data.entries === 'object') {
+            const hit = data.entries[sessionId];
+            if (hit && Array.isArray(hit.messages) && hit.messages.length > 0) {
+              db.close();
+              return hit;
+            }
+          }
+        }
+
+        // data.sessions / data.conversations / data.list
+        const containers = ['sessions', 'conversations', 'list'];
+        for (const c of containers) {
+          if (data && data[c]) {
+            const container = data[c];
+            if (Array.isArray(container)) {
+              const found = container.find((e: any) => (e.sessionId || e.id) === sessionId && Array.isArray(e.messages) && e.messages.length > 0);
+              if (found) {
+                db.close();
+                return found;
+              }
+            } else if (container && typeof container === 'object') {
+              const hit = container[sessionId];
+              if (hit && Array.isArray(hit.messages) && hit.messages.length > 0) {
+                db.close();
+                return hit;
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // 跳过非 JSON 或结构不匹配
+      }
+    }
+
+    db.close();
+    return null;
+  } catch (error) {
+    console.error('findSessionWithMessages error:', error);
+    return null;
+  }
 }

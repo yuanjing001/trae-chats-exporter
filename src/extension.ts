@@ -2,10 +2,37 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import path from 'path';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import initSqlJs from 'sql.js';
+import fs from 'fs/promises';
 import { getWorkspaces } from './utils';
 import { formatChatContent, safeParseTimestamp } from './utils';
+
+// 使用 sql.js 打开 SQLite 数据库
+async function openSqlJsDb(filePath: string) {
+  const SQL = await initSqlJs({
+    locateFile: (file: string) => require.resolve('sql.js/dist/' + file),
+  });
+  const data = await fs.readFile(filePath);
+  const db = new SQL.Database(new Uint8Array(data));
+  return { SQL, db };
+}
+
+function queryOneByKey(db: any, key: string): { value: string } | null {
+  const stmt = db.prepare('SELECT value FROM ItemTable WHERE [key] = ?');
+  stmt.bind([key]);
+  const row = stmt.step() ? (stmt.getAsObject() as any) : null;
+  stmt.free();
+  return row;
+}
+
+function queryAll(db: any, sql: string): { key: string; value: string }[] {
+  const res = db.exec(sql);
+  if (!res || res.length === 0) return [];
+  const { columns, values } = res[0];
+  const keyIdx = columns.indexOf('key');
+  const valueIdx = columns.indexOf('value');
+  return values.map((row: any[]) => ({ key: row[keyIdx], value: row[valueIdx] }));
+}
 
 // 当你的扩展被激活时会调用此方法
 // 扩展在第一次执行命令时被激活
@@ -65,10 +92,7 @@ export function activate(context: vscode.ExtensionContext) {
 				title: `Loading chats for ${workspace.folder ? path.basename(workspace.folder) : workspace.id}...`,
 				cancellable: false
 			}, async () => {
-				const db = await open({
-					filename: workspace.path,
-					driver: sqlite3.Database
-				});
+				const { db } = await openSqlJsDb(workspace.path);
 	
 				// Try multiple possible chat data keys - updated with correct key
 				const chatKeys = [
@@ -84,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
 				
 				// First try the known keys
 				for (const key of chatKeys) {
-					result = await db.get(`SELECT value FROM ItemTable WHERE [key] = ?`, key);
+					result = queryOneByKey(db, key);
 					if (result) {
 						usedKey = key;
 						break;
@@ -93,7 +117,7 @@ export function activate(context: vscode.ExtensionContext) {
 				
 				// If no known keys found, search for any chat-related keys
 				if (!result) {
-					const chatRelatedKeys = await db.all(`
+					const chatRelatedKeys = queryAll(db, `
 						SELECT [key], value FROM ItemTable 
 						WHERE [key] LIKE '%chat%' 
 						   OR [key] LIKE '%ai%' 
@@ -124,7 +148,7 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 				}
 	
-				await db.close();
+				db.close();
 				return { result, usedKey };
 			});
 	
